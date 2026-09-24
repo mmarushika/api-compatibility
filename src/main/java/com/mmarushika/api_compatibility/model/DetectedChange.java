@@ -1,39 +1,22 @@
 package com.mmarushika.api_compatibility.model;
 
-public class DetectedChange {
+import java.util.Objects;
 
-    private final ChangeType type;
-    private final ChangeLocation location;
-    private final String message;
+public record DetectedChange(
+        ChangeType type,
+        CompatibilityImpact impact,
+        ChangeLocation location,
+        String message) {
 
-    public DetectedChange(
-            ChangeType type,
-            ChangeLocation location,
-            String message) {
-
-        this.type = type;
-        this.location = location;
-        this.message = message;
-    }
-
-    public ChangeType getType() {
-        return type;
-    }
-
-    public ChangeLocation getLocation() {
-        return location;
-    }
-
-    public String getMessage() {
-        return message;
+    public DetectedChange {
+        Objects.requireNonNull(type, "type must not be null");
+        Objects.requireNonNull(impact, "impact must not be null");
+        Objects.requireNonNull(location, "location must not be null");
+        Objects.requireNonNull(message, "message must not be null");
     }
 
     @Override
     public String toString() {
-        return "DetectedChange{" +
-                "type=" + type +
-                ", location=" + location +
-                ", message='" + message + '\'' +
-                '}';
+        return type + " [" + impact + "] " + location.describe() + " - " + message;
     }
 }
