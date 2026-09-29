@@ -1,16 +1,18 @@
 package com.mmarushika.api_compatibility.comparison;
 
+import com.mmarushika.api_compatibility.model.ComparisonContext;
 import com.mmarushika.api_compatibility.model.DetectedChange;
+import com.mmarushika.api_compatibility.resolver.ReferenceResolver;
 
 import io.swagger.v3.oas.models.OpenAPI;
-import io.swagger.v3.oas.models.PathItem;
-import io.swagger.v3.oas.models.Paths;
+
+import org.springframework.stereotype.Component;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 
 // entry point for comparison of input OpenAPI objects
+@Component
 public class ComparisonEngine {
 
     private final PathComparator pathComparator;
@@ -20,15 +22,11 @@ public class ComparisonEngine {
                 pathComparator,
                 "pathComparator must not be null");
     }
-    
-    public List<DetectedChange> compare(OpenAPI oldSpec, OpenAPI newSpec) {
-        return pathComparator.compare(pathsOf(oldSpec), pathsOf(newSpec));
-    }
 
-    private static Map<String, PathItem> pathsOf(OpenAPI spec) {
-        if (spec == null || spec.getPaths() == null) {
-            return Map.of(); // creates empty map
-        }
-        return spec.getPaths();
+    public List<DetectedChange> compare(OpenAPI oldSpec, OpenAPI newSpec) {
+        ComparisonContext context =
+                new ComparisonContext(oldSpec, newSpec, new ReferenceResolver());
+
+        return pathComparator.compare(context);
     }
 }

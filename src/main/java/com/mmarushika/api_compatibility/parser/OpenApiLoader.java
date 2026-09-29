@@ -7,6 +7,9 @@ import io.swagger.v3.parser.OpenAPIV3Parser;
 import io.swagger.v3.parser.core.models.ParseOptions;
 import io.swagger.v3.parser.core.models.SwaggerParseResult;
 
+import org.springframework.stereotype.Component;
+
+@Component
 public class OpenApiLoader {
 
     public OpenAPI load(String location) {

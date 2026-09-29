@@ -3,15 +3,20 @@ package com.mmarushika.api_compatibility.comparison;
 import com.mmarushika.api_compatibility.model.ChangeLocation;
 import com.mmarushika.api_compatibility.model.ChangeType;
 import com.mmarushika.api_compatibility.model.CompatibilityImpact;
+import com.mmarushika.api_compatibility.model.ComparisonContext;
 import com.mmarushika.api_compatibility.model.DetectedChange;
 
+import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.PathItem;
+
+import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+@Component
 public class PathComparator {
 
     private final OperationComparator operationComparator;
@@ -22,12 +27,10 @@ public class PathComparator {
                 "operationComparator must not be null");
     }
 
-    public List<DetectedChange> compare(
-            Map<String, PathItem> oldPaths,
-            Map<String, PathItem> newPaths) {
+    public List<DetectedChange> compare(ComparisonContext context) {
 
-        Map<String, PathItem> previous = oldPaths == null ? Map.of() : oldPaths;
-        Map<String, PathItem> current = newPaths == null ? Map.of() : newPaths;
+        Map<String, PathItem> previous = pathsOf(context.oldOpenAPI());
+        Map<String, PathItem> current = pathsOf(context.newOpenAPI());
 
         List<DetectedChange> changes = new ArrayList<>();
 
@@ -41,6 +44,7 @@ public class PathComparator {
             }
 
             changes.addAll(operationComparator.compare(
+                    context,
                     path,
                     entry.getValue(),
                     current.get(path)));
@@ -53,6 +57,13 @@ public class PathComparator {
         }
 
         return List.copyOf(changes);
+    }
+
+    private static Map<String, PathItem> pathsOf(OpenAPI openAPI) {
+        if (openAPI == null || openAPI.getPaths() == null) {
+            return Map.of();
+        }
+        return openAPI.getPaths();
     }
 
     // change: removed path

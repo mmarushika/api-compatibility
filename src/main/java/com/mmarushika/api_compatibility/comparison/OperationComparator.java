@@ -3,10 +3,13 @@ package com.mmarushika.api_compatibility.comparison;
 import com.mmarushika.api_compatibility.model.ChangeLocation;
 import com.mmarushika.api_compatibility.model.ChangeType;
 import com.mmarushika.api_compatibility.model.CompatibilityImpact;
+import com.mmarushika.api_compatibility.model.ComparisonContext;
 import com.mmarushika.api_compatibility.model.DetectedChange;
 import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.PathItem;
 import io.swagger.v3.oas.models.PathItem.HttpMethod;
+
+import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -14,17 +17,31 @@ import java.util.Map;
 import java.util.Objects;
 
 
+@Component
 public class OperationComparator {
 
     private final ParameterComparator parameterComparator;
+    private final RequestBodyComparator requestBodyComparator;
+    private final ResponseComparator responseComparator;
 
-    public OperationComparator(ParameterComparator parameterComparator) {
+    public OperationComparator(
+            ParameterComparator parameterComparator,
+            RequestBodyComparator requestBodyComparator,
+            ResponseComparator responseComparator) {
+
         this.parameterComparator = Objects.requireNonNull(
                 parameterComparator,
                 "parameterComparator must not be null");
+        this.requestBodyComparator = Objects.requireNonNull(
+                requestBodyComparator,
+                "requestBodyComparator must not be null");
+        this.responseComparator = Objects.requireNonNull(
+                responseComparator,
+                "responseComparator must not be null");
     }
 
     public List<DetectedChange> compare(
+            ComparisonContext context,
             String path,
             PathItem oldPathItem,
             PathItem newPathItem) {
@@ -37,6 +54,7 @@ public class OperationComparator {
         for (Map.Entry<HttpMethod, Operation> entry : oldOperations.entrySet()) {
 
             HttpMethod method = entry.getKey();
+            Operation oldOperation = entry.getValue();
             Operation newOperation = newOperations.get(method);
 
             if (newOperation == null) {
@@ -47,8 +65,24 @@ public class OperationComparator {
             changes.addAll(parameterComparator.compare(
                     path,
                     method.name(),
-                    ParameterComparator.resolveEffectiveParameters(oldPathItem, entry.getValue()),
-                    ParameterComparator.resolveEffectiveParameters(newPathItem, newOperation)));
+                    ParameterComparator.resolveOldEffectiveParameters(
+                            context, oldPathItem, oldOperation),
+                    ParameterComparator.resolveNewEffectiveParameters(
+                            context, newPathItem, newOperation)));
+
+            changes.addAll(requestBodyComparator.compare(
+                    context,
+                    path,
+                    method.name(),
+                    oldOperation.getRequestBody(),
+                    newOperation.getRequestBody()));
+
+            changes.addAll(responseComparator.compare(
+                    context,
+                    path,
+                    method.name(),
+                    oldOperation.getResponses(),
+                    newOperation.getResponses()));
         }
 
         for (HttpMethod method : newOperations.keySet()) {
@@ -56,8 +90,6 @@ public class OperationComparator {
                 changes.add(added(path, method));
             }
         }
-        // TODO : call requestBodyComparator.compare(path, method.name(), oldOperation, newOperation);
-        // TODO : call responseComparator.compare(path, method.name(), oldOperation, newOperation);
 
         return List.copyOf(changes);
     }
