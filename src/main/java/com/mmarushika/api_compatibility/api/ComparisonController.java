@@ -33,6 +33,7 @@ public class ComparisonController {
 
     @PostMapping("/compare")
     public List<DetectedChange> compare(@RequestBody CompareRequest request) {
+        validate(request);
         return comparisonService.compare(request.oldDocument(), request.newDocument());
     }
 
@@ -41,6 +42,7 @@ public class ComparisonController {
             @RequestBody CompareRequest request,
             @RequestParam(defaultValue = "false") boolean failOnBreaking) {
 
+        validate(request);
         return respond(
                 comparisonService.compare(request.oldDocument(), request.newDocument()),
                 failOnBreaking);
@@ -63,6 +65,24 @@ public class ComparisonController {
         return new ErrorResponse(exception.getMessage());
     }
 
+    @ExceptionHandler(Exception.class)
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    public ErrorResponse handleUnexpectedError(Exception exception) {
+        return new ErrorResponse("An unexpected error occurred during comparison: " + exception.getMessage());
+    }
+
+    private static void validate(CompareRequest request) {
+        if (request == null) {
+            throw new InvalidOpenApiException("Request body cannot be null.");
+        }
+        if (request.oldDocument() == null || request.oldDocument().trim().isEmpty()) {
+            throw new InvalidOpenApiException("Baseline specification (oldDocument) cannot be empty.");
+        }
+        if (request.newDocument() == null || request.newDocument().trim().isEmpty()) {
+            throw new InvalidOpenApiException("Candidate specification (newDocument) cannot be empty.");
+        }
+    }
+
     private static ResponseEntity<ComparisonReport> respond(
             List<DetectedChange> changes, boolean failOnBreaking) {
 
@@ -74,6 +94,10 @@ public class ComparisonController {
     }
 
     private static String read(MultipartFile document) {
+        if (document == null || document.isEmpty()) {
+            throw new InvalidOpenApiException(
+                    "Uploaded file " + (document == null ? "document" : document.getOriginalFilename()) + " is empty.");
+        }
         try {
             return new String(document.getBytes(), StandardCharsets.UTF_8);
         } catch (IOException exception) {

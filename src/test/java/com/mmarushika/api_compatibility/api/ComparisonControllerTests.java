@@ -97,6 +97,18 @@ class ComparisonControllerTests {
     }
 
     @Test
+    void rejectsAnEmptyDocument() throws Exception {
+        String request = objectMapper.writeValueAsString(
+                new CompareRequest("", OLD_DOCUMENT));
+
+        mockMvc.perform(post("/api/compare")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").isNotEmpty());
+    }
+
+    @Test
     void rejectsAnUnreadableDocument() throws Exception {
         String request = objectMapper.writeValueAsString(
                 new CompareRequest("{invalid", OLD_DOCUMENT));

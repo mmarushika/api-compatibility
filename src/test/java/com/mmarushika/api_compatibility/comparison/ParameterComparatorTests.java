@@ -130,6 +130,31 @@ class ParameterComparatorTests {
         assertThat(ParameterComparator.resolveOldEffectiveParameters(context(), null, null)).isEmpty();
     }
 
+    @Test
+    void reportsParameterTypeChangeAsBreaking() {
+        Parameter oldParam = query("page", false).schema(new io.swagger.v3.oas.models.media.IntegerSchema());
+        Parameter newParam = query("page", false).schema(new io.swagger.v3.oas.models.media.StringSchema());
+
+        assertThat(compare(List.of(oldParam), List.of(newParam)))
+                .extracting(DetectedChange::type, DetectedChange::impact)
+                .containsExactly(tuple(ChangeType.SCHEMA_TYPE_CHANGED, CompatibilityImpact.BREAKING));
+    }
+
+    @Test
+    void reportsParameterConstraintRelaxationAsNonBreaking() {
+        io.swagger.v3.oas.models.media.IntegerSchema oldSchema = new io.swagger.v3.oas.models.media.IntegerSchema();
+        oldSchema.setMaximum(new java.math.BigDecimal("10"));
+        io.swagger.v3.oas.models.media.IntegerSchema newSchema = new io.swagger.v3.oas.models.media.IntegerSchema();
+        newSchema.setMaximum(new java.math.BigDecimal("20"));
+
+        Parameter oldParam = query("limit", false).schema(oldSchema);
+        Parameter newParam = query("limit", false).schema(newSchema);
+
+        assertThat(compare(List.of(oldParam), List.of(newParam)))
+                .extracting(DetectedChange::type, DetectedChange::impact)
+                .containsExactly(tuple(ChangeType.SCHEMA_CONSTRAINT_CHANGED, CompatibilityImpact.NON_BREAKING));
+    }
+
     private static ComparisonContext context() {
         return new ComparisonContext(new OpenAPI(), new OpenAPI(), new ReferenceResolver());
     }

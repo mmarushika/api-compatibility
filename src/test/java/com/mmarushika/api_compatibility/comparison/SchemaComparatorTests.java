@@ -215,6 +215,72 @@ class SchemaComparatorTests {
         assertThat(compare(request(), self, self)).isEmpty();
     }
 
+    @Test
+    void mergesAllOfPropertiesWhenComparingObjects() {
+        ObjectSchema base = new ObjectSchema();
+        base.addProperties("id", new IntegerSchema());
+
+        ObjectSchema ext = new ObjectSchema();
+        ext.addAllOfItem(base);
+        ext.addProperties("name", new StringSchema());
+
+        ObjectSchema full = new ObjectSchema();
+        full.addProperties("id", new IntegerSchema());
+        full.addProperties("name", new StringSchema());
+
+        assertThat(compare(request(), ext, full)).isEmpty();
+    }
+
+    @Test
+    void reportsOneOfAlternativeRemovalAsBreakingInRequest() {
+        Schema<?> oldOneOf = new Schema<>().addOneOfItem(new StringSchema()).addOneOfItem(new IntegerSchema());
+        Schema<?> newOneOf = new Schema<>().addOneOfItem(new StringSchema());
+
+        assertThat(compare(request(), oldOneOf, newOneOf))
+                .extracting(DetectedChange::type, DetectedChange::impact)
+                .contains(tuple(ChangeType.SCHEMA_REMOVED, CompatibilityImpact.BREAKING));
+    }
+
+    @Test
+    void reportsOneOfAlternativeAdditionAsBreakingInResponse() {
+        Schema<?> oldOneOf = new Schema<>().addOneOfItem(new StringSchema());
+        Schema<?> newOneOf = new Schema<>().addOneOfItem(new StringSchema()).addOneOfItem(new IntegerSchema());
+
+        assertThat(compare(response(), oldOneOf, newOneOf))
+                .extracting(DetectedChange::type, DetectedChange::impact)
+                .contains(tuple(ChangeType.SCHEMA_ADDED, CompatibilityImpact.BREAKING));
+    }
+
+    @Test
+    void ignoresReadOnlyPropertyRemovalInRequest() {
+        StringSchema readOnlyId = new StringSchema();
+        readOnlyId.setReadOnly(true);
+
+        ObjectSchema oldObj = new ObjectSchema();
+        oldObj.addProperties("id", readOnlyId);
+
+        ObjectSchema newObj = new ObjectSchema();
+
+        assertThat(compare(request(), oldObj, newObj))
+                .extracting(DetectedChange::impact)
+                .containsOnly(CompatibilityImpact.NON_BREAKING);
+    }
+
+    @Test
+    void ignoresWriteOnlyPropertyRemovalInResponse() {
+        StringSchema writeOnlyPass = new StringSchema();
+        writeOnlyPass.setWriteOnly(true);
+
+        ObjectSchema oldObj = new ObjectSchema();
+        oldObj.addProperties("password", writeOnlyPass);
+
+        ObjectSchema newObj = new ObjectSchema();
+
+        assertThat(compare(response(), oldObj, newObj))
+                .extracting(DetectedChange::impact)
+                .containsOnly(CompatibilityImpact.NON_BREAKING);
+    }
+
     private List<DetectedChange> compare(
             ChangeLocation location, Schema<?> oldSchema, Schema<?> newSchema) {
 

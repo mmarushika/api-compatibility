@@ -19,6 +19,12 @@ public class OpenApiLoader {
     }
 
     public OpenAPI loadContents(String contents) {
+        if (contents == null || contents.trim().isEmpty()) {
+            throw new InvalidOpenApiException("The OpenAPI document is empty.");
+        }
+        if (contents.length() > 10_000_000) {
+            throw new InvalidOpenApiException("The OpenAPI document exceeds maximum allowed size.");
+        }
         return parsed(
                 new OpenAPIV3Parser().readContents(contents, null, parseOptions()),
                 "the given content");

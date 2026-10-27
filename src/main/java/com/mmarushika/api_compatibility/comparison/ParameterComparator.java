@@ -12,19 +12,48 @@ import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.PathItem;
 import io.swagger.v3.oas.models.parameters.Parameter;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 @Component
 public class ParameterComparator {
 
     private static final String PATH_LOCATION = "path";
+    private final SchemaComparator schemaComparator;
+
+    @Autowired
+    public ParameterComparator(SchemaComparator schemaComparator) {
+        this.schemaComparator = Objects.requireNonNull(
+                schemaComparator,
+                "schemaComparator must not be null");
+    }
+
+    public ParameterComparator() {
+        this(new SchemaComparator());
+    }
 
     public List<DetectedChange> compare(
+            String path,
+            String method,
+            List<Parameter> oldParameters,
+            List<Parameter> newParameters) {
+
+        return compare(
+                new ComparisonContext(new OpenAPI(), new OpenAPI(), new ReferenceResolver()),
+                path,
+                method,
+                oldParameters,
+                newParameters);
+    }
+
+    public List<DetectedChange> compare(
+            ComparisonContext context,
             String path,
             String method,
             List<Parameter> oldParameters,
@@ -55,6 +84,17 @@ public class ParameterComparator {
                             newParameter
                     )
             );
+
+            io.swagger.v3.oas.models.media.Schema<?> oldSchema = extractSchema(entry.getValue());
+            io.swagger.v3.oas.models.media.Schema<?> newSchema = extractSchema(newParameter);
+
+            if (oldSchema != null || newSchema != null) {
+                changes.addAll(schemaComparator.compare(
+                        context,
+                        location(path, method, key),
+                        oldSchema,
+                        newSchema));
+            }
         }
 
         for (Map.Entry<ParameterKey, Parameter> entry : current.entrySet()) {
@@ -64,6 +104,19 @@ public class ParameterComparator {
         }
 
         return List.copyOf(changes);
+    }
+
+    private static io.swagger.v3.oas.models.media.Schema<?> extractSchema(Parameter parameter) {
+        if (parameter == null) {
+            return null;
+        }
+        if (parameter.getSchema() != null) {
+            return parameter.getSchema();
+        }
+        if (parameter.getContent() != null && !parameter.getContent().isEmpty()) {
+            return parameter.getContent().values().iterator().next().getSchema();
+        }
+        return null;
     }
 
     public static List<Parameter> resolveOldEffectiveParameters(

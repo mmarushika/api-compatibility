@@ -25,6 +25,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 @SpringBootTest
 class OperationComparatorTests {
@@ -103,6 +104,18 @@ class OperationComparatorTests {
         assertThat(operationComparator.compare(context(), "/users", get, null))
                 .extracting(DetectedChange::type)
                 .containsExactly(ChangeType.OPERATION_REMOVED);
+    }
+
+    @Test
+    void reportsAddingSecurityToPublicOperationAsBreaking() {
+        PathItem publicItem = new PathItem().get(new Operation());
+        PathItem securedItem = new PathItem().get(
+                new Operation().addSecurityItem(
+                        new io.swagger.v3.oas.models.security.SecurityRequirement().addList("BearerAuth")));
+
+        assertThat(operationComparator.compare(context(), "/users", publicItem, securedItem))
+                .extracting(DetectedChange::type, DetectedChange::impact)
+                .contains(tuple(ChangeType.OPERATION_REQUIREDNESS_ADDED, CompatibilityImpact.BREAKING));
     }
 
     @Test

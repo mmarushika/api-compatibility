@@ -96,6 +96,40 @@ class ResponseComparatorTests {
     }
 
     @Test
+    void reportsRemovedResponseHeaderAsBreaking() {
+        ApiResponse oldResp = jsonResponse(new StringSchema())
+                .addHeaderObject("X-Rate-Limit", new io.swagger.v3.oas.models.headers.Header().schema(new IntegerSchema()));
+        ApiResponse newResp = jsonResponse(new StringSchema());
+
+        assertThat(compare(responses("200", oldResp), responses("200", newResp)))
+                .extracting(DetectedChange::type, DetectedChange::impact)
+                .contains(tuple(ChangeType.PARAMETER_REMOVED, CompatibilityImpact.BREAKING));
+    }
+
+    @Test
+    void reportsAddedResponseHeaderAsNonBreaking() {
+        ApiResponse oldResp = jsonResponse(new StringSchema());
+        ApiResponse newResp = jsonResponse(new StringSchema())
+                .addHeaderObject("X-Rate-Limit", new io.swagger.v3.oas.models.headers.Header().schema(new IntegerSchema()));
+
+        assertThat(compare(responses("200", oldResp), responses("200", newResp)))
+                .extracting(DetectedChange::type, DetectedChange::impact)
+                .contains(tuple(ChangeType.PARAMETER_ADDED, CompatibilityImpact.NON_BREAKING));
+    }
+
+    @Test
+    void reportsHeaderTypeChangeAsBreaking() {
+        ApiResponse oldResp = jsonResponse(new StringSchema())
+                .addHeaderObject("X-Rate-Limit", new io.swagger.v3.oas.models.headers.Header().schema(new IntegerSchema()));
+        ApiResponse newResp = jsonResponse(new StringSchema())
+                .addHeaderObject("X-Rate-Limit", new io.swagger.v3.oas.models.headers.Header().schema(new StringSchema()));
+
+        assertThat(compare(responses("200", oldResp), responses("200", newResp)))
+                .extracting(DetectedChange::type, DetectedChange::impact)
+                .contains(tuple(ChangeType.SCHEMA_TYPE_CHANGED, CompatibilityImpact.BREAKING));
+    }
+
+    @Test
     void treatsMissingResponsesAsEmpty() {
         assertThat(compare(null, null)).isEmpty();
     }

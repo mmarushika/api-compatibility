@@ -82,6 +82,16 @@ public class ReferenceResolver {
             if (nested != null) {
                 return resolveLocalReference(nested, openAPI, visited);
             }
+        } else if (current instanceof io.swagger.v3.oas.models.headers.Header header) {
+            String nested = header.get$ref();
+            if (nested != null) {
+                return resolveLocalReference(nested, openAPI, visited);
+            }
+        } else if (current instanceof io.swagger.v3.oas.models.security.SecurityScheme scheme) {
+            String nested = scheme.get$ref();
+            if (nested != null) {
+                return resolveLocalReference(nested, openAPI, visited);
+            }
         }
         return current;
     }
@@ -114,6 +124,92 @@ public class ReferenceResolver {
                 case CALLBACKS -> components.getCallbacks();
                 default -> null;
             };
+        }
+
+        if (current instanceof io.swagger.v3.oas.models.PathItem pathItem) {
+            return switch (token.toLowerCase()) {
+                case "get" -> pathItem.getGet();
+                case "put" -> pathItem.getPut();
+                case "post" -> pathItem.getPost();
+                case "delete" -> pathItem.getDelete();
+                case "options" -> pathItem.getOptions();
+                case "head" -> pathItem.getHead();
+                case "patch" -> pathItem.getPatch();
+                case "trace" -> pathItem.getTrace();
+                case PARAMETERS -> pathItem.getParameters();
+                case "summary" -> pathItem.getSummary();
+                case "description" -> pathItem.getDescription();
+                default -> null;
+            };
+        }
+
+        if (current instanceof io.swagger.v3.oas.models.Operation operation) {
+            return switch (token) {
+                case PARAMETERS -> operation.getParameters();
+                case REQUEST_BODIES, "requestBody" -> operation.getRequestBody();
+                case RESPONSES -> operation.getResponses();
+                case SECURITY -> operation.getSecurity();
+                default -> null;
+            };
+        }
+
+        if (current instanceof io.swagger.v3.oas.models.responses.ApiResponse response) {
+            return switch (token) {
+                case HEADERS -> response.getHeaders();
+                case "content" -> response.getContent();
+                case "description" -> response.getDescription();
+                default -> null;
+            };
+        }
+
+        if (current instanceof io.swagger.v3.oas.models.media.MediaType mediaType) {
+            return switch (token) {
+                case "schema" -> mediaType.getSchema();
+                case EXAMPLES -> mediaType.getExamples();
+                case "example" -> mediaType.getExample();
+                default -> null;
+            };
+        }
+
+        if (current instanceof io.swagger.v3.oas.models.headers.Header header) {
+            return switch (token) {
+                case "schema" -> header.getSchema();
+                case "content" -> header.getContent();
+                default -> null;
+            };
+        }
+
+        if (current instanceof io.swagger.v3.oas.models.media.Schema<?> schema) {
+            return switch (token) {
+                case "properties" -> schema.getProperties();
+                case "items" -> schema.getItems();
+                case "allOf" -> schema.getAllOf();
+                case "oneOf" -> schema.getOneOf();
+                case "anyOf" -> schema.getAnyOf();
+                case "not" -> schema.getNot();
+                case "additionalProperties" -> schema.getAdditionalProperties();
+                default -> null;
+            };
+        }
+
+        if (current instanceof io.swagger.v3.oas.models.parameters.RequestBody requestBody) {
+            return switch (token) {
+                case "content" -> requestBody.getContent();
+                case "description" -> requestBody.getDescription();
+                default -> null;
+            };
+        }
+
+        if (current instanceof java.util.List<?> list) {
+            try {
+                int index = Integer.parseInt(token);
+                if (index >= 0 && index < list.size()) {
+                    return list.get(index);
+                }
+            } catch (NumberFormatException ignored) {
+                // Not a numeric index
+            }
+            return null;
         }
 
         if (current instanceof Map<?, ?> map) {

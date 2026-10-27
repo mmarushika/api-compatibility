@@ -15,6 +15,8 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -98,6 +100,7 @@ public class SchemaComparator {
         compareAdditionalProperties(context, location, old, current, visited, changes);
         compareItems(context, location, old, current, visited, changes);
         compareProperties(context, location, old, current, visited, changes);
+        compareComposition(context, location, old, current, visited, changes);
 
         return List.copyOf(changes);
     }
@@ -366,18 +369,27 @@ public class SchemaComparator {
             Set<SchemaPair> visited,
             List<DetectedChange> changes) {
 
-        Map<String, Schema> oldProperties =
-                old.getProperties() == null ? Map.of() : old.getProperties();
-        Map<String, Schema> newProperties =
-                current.getProperties() == null ? Map.of() : current.getProperties();
+        Map<String, Schema> oldProperties = effectiveProperties(context, old);
+        Map<String, Schema> newProperties = effectiveProperties(context, current);
 
-        compareRequiredProperties(location, old, current, changes);
+        compareRequiredProperties(context, location, old, current, oldProperties, newProperties, changes);
 
         for (String property : oldProperties.keySet()) {
             if (!newProperties.containsKey(property)) {
+                Schema<?> oldProp = oldProperties.get(property);
+                boolean isReadOnly = isReadOnly(oldProp);
+                boolean isWriteOnly = isWriteOnly(oldProp);
+
+                CompatibilityImpact impact = CompatibilityImpact.BREAKING;
+                if (location.context() == ChangeContext.REQUEST && isReadOnly) {
+                    impact = CompatibilityImpact.NON_BREAKING;
+                } else if (location.context() == ChangeContext.RESPONSE && isWriteOnly) {
+                    impact = CompatibilityImpact.NON_BREAKING;
+                }
+
                 changes.add(change(
                         ChangeType.SCHEMA_PROPERTY_REMOVED,
-                        CompatibilityImpact.BREAKING,
+                        impact,
                         propertyLocation(location, property),
                         "Property " + property + " at " + location.describe()
                                 + " was removed."));
@@ -397,32 +409,55 @@ public class SchemaComparator {
 
         for (String property : oldProperties.keySet()) {
             if (newProperties.containsKey(property)) {
+                Schema<?> oldProp = oldProperties.get(property);
+                Schema<?> newProp = newProperties.get(property);
+
+                // If readOnly in request or writeOnly in response, skip detailed sub-comparison or report non-breaking
+                if (location.context() == ChangeContext.REQUEST && isReadOnly(oldProp) && isReadOnly(newProp)) {
+                    continue;
+                }
+                if (location.context() == ChangeContext.RESPONSE && isWriteOnly(oldProp) && isWriteOnly(newProp)) {
+                    continue;
+                }
+
                 changes.addAll(compare(
                         context,
                         propertyLocation(location, property),
-                        oldProperties.get(property),
-                        newProperties.get(property),
+                        oldProp,
+                        newProp,
                         visited));
             }
         }
     }
 
-
     private void compareRequiredProperties(
+            ComparisonContext context,
             ChangeLocation location,
             Schema<?> old,
             Schema<?> current,
+            Map<String, Schema> oldProperties,
+            Map<String, Schema> newProperties,
             List<DetectedChange> changes) {
 
-        List<String> oldRequired = old.getRequired() == null ? List.of() : old.getRequired();
-        List<String> newRequired =
-                current.getRequired() == null ? List.of() : current.getRequired();
+        List<String> oldRequired = effectiveRequired(context, old);
+        List<String> newRequired = effectiveRequired(context, current);
 
         for (String property : newRequired) {
             if (!oldRequired.contains(property)) {
+                Schema<?> propSchema = newProperties.get(property);
+                boolean isReadOnly = isReadOnly(propSchema);
+                boolean isWriteOnly = isWriteOnly(propSchema);
+
+                CompatibilityImpact impact = impact(location, true);
+                if (location.context() == ChangeContext.REQUEST && isReadOnly) {
+                    impact = CompatibilityImpact.NON_BREAKING;
+                } else if (location.context() == ChangeContext.RESPONSE && isWriteOnly) {
+                    impact = CompatibilityImpact.NON_BREAKING;
+                }
+
                 changes.add(change(
                         ChangeType.SCHEMA_PROPERTY_REQUIREDNESS_ADDED,
-                        impact(location, true),
+                        impact,
                         propertyLocation(location, property),
                         "Property " + property + " at " + location.describe()
                                 + " is now required."));
@@ -431,14 +466,289 @@ public class SchemaComparator {
 
         for (String property : oldRequired) {
             if (!newRequired.contains(property)) {
+                Schema<?> propSchema = oldProperties.get(property);
+                boolean isReadOnly = isReadOnly(propSchema);
+                boolean isWriteOnly = isWriteOnly(propSchema);
+
+                CompatibilityImpact impact = impact(location, false);
+                if (location.context() == ChangeContext.REQUEST && isReadOnly) {
+                    impact = CompatibilityImpact.NON_BREAKING;
+                } else if (location.context() == ChangeContext.RESPONSE && isWriteOnly) {
+                    impact = CompatibilityImpact.NON_BREAKING;
+                }
+
                 changes.add(change(
                         ChangeType.SCHEMA_PROPERTY_REQUIREDNESS_REMOVED,
-                        impact(location, false),
+                        impact,
                         propertyLocation(location, property),
                         "Property " + property + " at " + location.describe()
                                 + " is no longer required."));
             }
         }
+    }
+
+    private void compareComposition(
+            ComparisonContext context,
+            ChangeLocation location,
+            Schema<?> old,
+            Schema<?> current,
+            Set<SchemaPair> visited,
+            List<DetectedChange> changes) {
+
+        comparePolymorphic(context, location, "oneOf", old.getOneOf(), current.getOneOf(), visited, changes);
+        comparePolymorphic(context, location, "anyOf", old.getAnyOf(), current.getAnyOf(), visited, changes);
+        compareAllOf(context, location, old.getAllOf(), current.getAllOf(), visited, changes);
+        compareNot(context, location, old.getNot(), current.getNot(), visited, changes);
+    }
+
+    private void comparePolymorphic(
+            ComparisonContext context,
+            ChangeLocation location,
+            String operator,
+            List<Schema> oldAlternatives,
+            List<Schema> newAlternatives,
+            Set<SchemaPair> visited,
+            List<DetectedChange> changes) {
+
+        List<Schema> oldList = oldAlternatives == null ? List.of() : oldAlternatives;
+        List<Schema> newList = newAlternatives == null ? List.of() : newAlternatives;
+
+        if (oldList.isEmpty() && newList.isEmpty()) {
+            return;
+        }
+
+        Map<String, Schema> oldIndexed = indexAlternatives(oldList);
+        Map<String, Schema> newIndexed = indexAlternatives(newList);
+
+        for (Map.Entry<String, Schema> entry : oldIndexed.entrySet()) {
+            String key = entry.getKey();
+            if (!newIndexed.containsKey(key)) {
+                ChangeLocation altLocation = compositionLocation(location, operator, key);
+                changes.add(change(
+                        ChangeType.SCHEMA_REMOVED,
+                        impact(location, true),
+                        altLocation,
+                        "Schema alternative in " + operator + " at " + altLocation.describe() + " was removed."));
+            }
+        }
+
+        for (Map.Entry<String, Schema> entry : newIndexed.entrySet()) {
+            String key = entry.getKey();
+            if (!oldIndexed.containsKey(key)) {
+                ChangeLocation altLocation = compositionLocation(location, operator, key);
+                changes.add(change(
+                        ChangeType.SCHEMA_ADDED,
+                        impact(location, false),
+                        altLocation,
+                        "Schema alternative in " + operator + " at " + altLocation.describe() + " was added."));
+            }
+        }
+
+        for (Map.Entry<String, Schema> entry : oldIndexed.entrySet()) {
+            String key = entry.getKey();
+            Schema newAlt = newIndexed.get(key);
+            if (newAlt != null) {
+                ChangeLocation altLocation = compositionLocation(location, operator, key);
+                changes.addAll(compare(context, altLocation, entry.getValue(), newAlt, visited));
+            }
+        }
+    }
+
+    private void compareAllOf(
+            ComparisonContext context,
+            ChangeLocation location,
+            List<Schema> oldAllOf,
+            List<Schema> newAllOf,
+            Set<SchemaPair> visited,
+            List<DetectedChange> changes) {
+
+        List<Schema> oldList = oldAllOf == null ? List.of() : oldAllOf;
+        List<Schema> newList = newAllOf == null ? List.of() : newAllOf;
+
+        if (oldList.isEmpty() || newList.isEmpty()) {
+            return;
+        }
+
+        Map<String, Schema> oldIndexed = indexAlternatives(oldList);
+        Map<String, Schema> newIndexed = indexAlternatives(newList);
+
+        // For allOf:
+        // In REQUEST: adding allOf requirement tightens constraints (tightened=true -> BREAKING)
+        // In RESPONSE: adding allOf requirement guarantees more (tightened=false -> NON_BREAKING)
+        for (Map.Entry<String, Schema> entry : oldIndexed.entrySet()) {
+            String key = entry.getKey();
+            if (!newIndexed.containsKey(key)) {
+                ChangeLocation altLocation = compositionLocation(location, "allOf", key);
+                changes.add(change(
+                        ChangeType.SCHEMA_REMOVED,
+                        impact(location, false),
+                        altLocation,
+                        "Schema component in allOf at " + altLocation.describe() + " was removed."));
+            }
+        }
+
+        for (Map.Entry<String, Schema> entry : newIndexed.entrySet()) {
+            String key = entry.getKey();
+            if (!oldIndexed.containsKey(key)) {
+                ChangeLocation altLocation = compositionLocation(location, "allOf", key);
+                changes.add(change(
+                        ChangeType.SCHEMA_ADDED,
+                        impact(location, true),
+                        altLocation,
+                        "Schema component in allOf at " + altLocation.describe() + " was added."));
+            }
+        }
+
+        for (Map.Entry<String, Schema> entry : oldIndexed.entrySet()) {
+            String key = entry.getKey();
+            Schema newAlt = newIndexed.get(key);
+            if (newAlt != null) {
+                ChangeLocation altLocation = compositionLocation(location, "allOf", key);
+                changes.addAll(compare(context, altLocation, entry.getValue(), newAlt, visited));
+            }
+        }
+    }
+
+    private void compareNot(
+            ComparisonContext context,
+            ChangeLocation location,
+            Schema<?> oldNot,
+            Schema<?> currentNot,
+            Set<SchemaPair> visited,
+            List<DetectedChange> changes) {
+
+        if (oldNot == null && currentNot == null) {
+            return;
+        }
+
+        ChangeLocation notLocation = location.withPropertyPath(
+                location.propertyPath() == null ? "not" : location.propertyPath() + ".not");
+
+        if (oldNot == null) {
+            changes.add(change(
+                    ChangeType.SCHEMA_ADDED,
+                    impact(location, true),
+                    notLocation,
+                    "Schema restriction 'not' at " + notLocation.describe() + " was added."));
+            return;
+        }
+
+        if (currentNot == null) {
+            changes.add(change(
+                    ChangeType.SCHEMA_REMOVED,
+                    impact(location, false),
+                    notLocation,
+                    "Schema restriction 'not' at " + notLocation.describe() + " was removed."));
+            return;
+        }
+
+        changes.addAll(compare(context, notLocation, oldNot, currentNot, visited));
+    }
+
+    private Map<String, Schema> indexAlternatives(List<Schema> alternatives) {
+        Map<String, Schema> indexed = new LinkedHashMap<>();
+        for (int i = 0; i < alternatives.size(); i++) {
+            Schema schema = alternatives.get(i);
+            String id;
+            if (schema.get$ref() != null) {
+                String ref = schema.get$ref();
+                id = ref.substring(ref.lastIndexOf('/') + 1);
+            } else if (schema.getTitle() != null && !schema.getTitle().isBlank()) {
+                id = schema.getTitle();
+            } else if (schema.getType() != null) {
+                id = schema.getType();
+            } else {
+                id = String.valueOf(i);
+            }
+            if (indexed.containsKey(id)) {
+                id = id + "_" + i;
+            }
+            indexed.put(id, schema);
+        }
+        return indexed;
+    }
+
+    private ChangeLocation compositionLocation(ChangeLocation location, String operator, String identifier) {
+        String path = location.propertyPath();
+        String sub = operator + "[" + identifier + "]";
+        return location.withPropertyPath(path == null ? sub : path + "." + sub);
+    }
+
+    private Map<String, Schema> effectiveProperties(ComparisonContext context, Schema<?> schema) {
+        Map<String, Schema> properties = new LinkedHashMap<>();
+        collectProperties(context, schema, properties, java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>()));
+        return properties;
+    }
+
+    private void collectProperties(
+            ComparisonContext context,
+            Schema<?> schema,
+            Map<String, Schema> target,
+            Set<Schema<?>> visited) {
+        if (schema == null || !visited.add(schema)) {
+            return;
+        }
+
+        if (schema.getProperties() != null) {
+            target.putAll(schema.getProperties());
+        }
+
+        if (schema.getAllOf() != null) {
+            for (Schema<?> sub : schema.getAllOf()) {
+                Schema<?> resolved = resolveSchema(context, sub);
+                collectProperties(context, resolved, target, visited);
+            }
+        }
+    }
+
+    private List<String> effectiveRequired(ComparisonContext context, Schema<?> schema) {
+        Set<String> required = new LinkedHashSet<>();
+        collectRequired(context, schema, required, java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>()));
+        return new ArrayList<>(required);
+    }
+
+    private void collectRequired(
+            ComparisonContext context,
+            Schema<?> schema,
+            Set<String> target,
+            Set<Schema<?>> visited) {
+        if (schema == null || !visited.add(schema)) {
+            return;
+        }
+
+        if (schema.getRequired() != null) {
+            target.addAll(schema.getRequired());
+        }
+
+        if (schema.getAllOf() != null) {
+            for (Schema<?> sub : schema.getAllOf()) {
+                Schema<?> resolved = resolveSchema(context, sub);
+                collectRequired(context, resolved, target, visited);
+            }
+        }
+    }
+
+    private Schema<?> resolveSchema(ComparisonContext context, Schema<?> schema) {
+        if (schema == null || schema.get$ref() == null) {
+            return schema;
+        }
+        Object resolved = context.referenceResolver().resolve(schema.get$ref(), context.oldOpenAPI());
+        if (resolved instanceof Schema<?> resolvedSchema) {
+            return resolvedSchema;
+        }
+        resolved = context.referenceResolver().resolve(schema.get$ref(), context.newOpenAPI());
+        if (resolved instanceof Schema<?> resolvedSchema) {
+            return resolvedSchema;
+        }
+        return schema;
+    }
+
+    private boolean isReadOnly(Schema<?> schema) {
+        return schema != null && Boolean.TRUE.equals(schema.getReadOnly());
+    }
+
+    private boolean isWriteOnly(Schema<?> schema) {
+        return schema != null && Boolean.TRUE.equals(schema.getWriteOnly());
     }
 
     private Resolution resolve(

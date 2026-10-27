@@ -44,6 +44,15 @@ public record ChangeLocation(
                 path, method, ChangeContext.RESPONSE, statusCode, null, null, null, null);
     }
 
+    public static ChangeLocation forResponseHeader(
+            String path,
+            String method,
+            String statusCode,
+            String headerName) {
+        return new ChangeLocation(
+                path, method, ChangeContext.RESPONSE, statusCode, null, headerName, "header", null);
+    }
+
     public ChangeLocation withMediaType(String mediaType) {
         return new ChangeLocation(
                 path, method, context, statusCode, mediaType, parameterName, parameterIn, propertyPath);

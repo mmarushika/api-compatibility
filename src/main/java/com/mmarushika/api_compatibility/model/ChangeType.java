@@ -8,6 +8,8 @@ public enum ChangeType {
     // OperationComparator
     OPERATION_ADDED,
     OPERATION_REMOVED,
+    OPERATION_REQUIREDNESS_ADDED,
+    OPERATION_REQUIREDNESS_REMOVED,
 
     // ParameterComparator
     PARAMETER_ADDED,
